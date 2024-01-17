@@ -1,0 +1,4 @@
+(executable
+ (name doskya)
+ (public_name doskya)
+ (libraries omd piaf routes eio_main))

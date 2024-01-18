@@ -36,10 +36,6 @@ module Route = struct
   end
 end
 
-let not_found () =
-  let body = Body.of_string "Not found" in
-  Response.create ~body `Not_found
-
 let invalid_method () =
   let body = Body.of_string "Invalid method" in
   Response.create ~body `Method_not_allowed
@@ -107,6 +103,17 @@ let render ~title ~content =
   |}
     title content
 
+let not_found ~cwd =
+  let markdown = Omd.of_string @@ Path.(load @@ (cwd / "not_found.md")) in
+  let content = Omd.to_html markdown in
+  (* TODO: better than 404? Maybe link to create page *)
+  let body = Body.of_string @@ render ~title:"404 - Doskya" ~content in
+  Response.create ~body `Not_found
+
+let load_if_fail_not_found ~cwd ~path k =
+  try k @@ Path.load path with _exn -> not_found ~cwd
+(* TODO: ensure exception is the right one *)
+
 (* TODO: markdown currently supports HTML *)
 let on_home ~cwd =
   let markdown = Omd.of_string @@ Path.(load @@ (cwd / "home.md")) in
@@ -116,9 +123,9 @@ let on_home ~cwd =
   Response.create ~body `OK
 
 let on_wiki ~cwd ~page =
-  let markdown =
-    Omd.of_string @@ Path.(load @@ (cwd / "wiki" / (page ^ ".md")))
-  in
+  let path = Path.(cwd / "wiki" / (page ^ ".md")) in
+  load_if_fail_not_found ~cwd ~path @@ fun markdown ->
+  let markdown = Omd.of_string markdown in
   let title = extract_title ~markdown ^ " - Doskya" in
   let content = Omd.to_html markdown in
   let body = Body.of_string @@ render ~title ~content in
@@ -157,7 +164,7 @@ let main () =
           | Some Home -> on_home ~cwd
           | Some (Wiki { page }) -> on_wiki ~cwd ~page
           | Some Styles -> on_styles ~cwd
-          | None -> not_found ())
+          | None -> not_found ~cwd)
       | `Other _ | `PUT | `OPTIONS | `CONNECT | `TRACE | `DELETE | `HEAD | `POST
         ->
           invalid_method ()

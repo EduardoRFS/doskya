@@ -5,8 +5,9 @@ module Route = struct
   module Path = struct
     open Routes
 
-    type path = Wiki of { page : string } | Styles
+    type path = Home | Wiki of { page : string } | Styles
 
+    let home () = nil
     let wiki () = s "wiki" / str /? nil
     let styles () = s "styles" / s "base.css" /? nil
 
@@ -14,12 +15,14 @@ module Route = struct
       Routes.(
         one_of
           [
+            route (home ()) Home;
             route (wiki ()) (fun page -> Wiki { page });
             route (styles ()) Styles;
           ])
 
     let _to_string path =
       match path with
+      | Home -> sprintf (home ())
       | Wiki { page } -> sprintf (wiki ()) page
       | Styles -> sprintf (styles ())
 
@@ -95,7 +98,7 @@ let render ~title ~content =
     />
     <link rel="stylesheet" href="/styles/base.css" />
 
-    <title>%s - Doskya</title>
+    <title>%s</title>
   </head>
   <body>
     %s
@@ -104,11 +107,19 @@ let render ~title ~content =
   |}
     title content
 
+(* TODO: markdown currently supports HTML *)
+let on_home ~cwd =
+  let markdown = Omd.of_string @@ Path.(load @@ (cwd / "home.md")) in
+  let content = Omd.to_html markdown in
+  let body = Body.of_string @@ render ~title:"Doskya" ~content in
+  (* TODO: content-type *)
+  Response.create ~body `OK
+
 let on_wiki ~cwd ~page =
   let markdown =
     Omd.of_string @@ Path.(load @@ (cwd / "wiki" / (page ^ ".md")))
   in
-  let title = extract_title ~markdown in
+  let title = extract_title ~markdown ^ " - Doskya" in
   let content = Omd.to_html markdown in
   let body = Body.of_string @@ render ~title ~content in
   (* TODO: content-type *)
@@ -143,6 +154,7 @@ let main () =
       match meth with
       | `GET -> (
           match Route.Path.of_string target with
+          | Some Home -> on_home ~cwd
           | Some (Wiki { page }) -> on_wiki ~cwd ~page
           | Some Styles -> on_styles ~cwd
           | None -> not_found ())

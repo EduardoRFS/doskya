@@ -50,8 +50,8 @@ exception Invalid_markdown
 
 let extract_title ~markdown =
   let open Omd in
-  let block : attributes block =
-    match markdown with [ block ] -> block | _ -> raise Invalid_markdown
+  let block =
+    match markdown with block :: _rest -> block | [] -> raise Invalid_markdown
   in
   let size, inline =
     match block with

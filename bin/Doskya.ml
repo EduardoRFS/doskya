@@ -5,13 +5,23 @@ module Route = struct
   module Path = struct
     open Routes
 
-    type path = Wiki of { page : string }
+    type path = Wiki of { page : string } | Styles
 
     let wiki () = s "wiki" / str /? nil
-    let router = Routes.(one_of [ route (wiki ()) (fun page -> Wiki { page }) ])
+    let styles () = s "styles" / s "base.css" /? nil
+
+    let router =
+      Routes.(
+        one_of
+          [
+            route (wiki ()) (fun page -> Wiki { page });
+            route (styles ()) Styles;
+          ])
 
     let _to_string path =
-      match path with Wiki { page } -> sprintf (wiki ()) page
+      match path with
+      | Wiki { page } -> sprintf (wiki ()) page
+      | Styles -> sprintf (styles ())
 
     let of_string string =
       match match' router ~target:string with
@@ -36,11 +46,78 @@ let server_error exn =
   let body = Body.of_string message in
   Response.create ~body `Internal_server_error
 
+(* TODO: better way of handling *)
+exception Invalid_markdown
+
+let extract_title ~markdown =
+  let open Omd in
+  let block : attributes block =
+    match markdown with [ block ] -> block | _ -> raise Invalid_markdown
+  in
+  let size, inline =
+    match block with
+    (* TODO: explain inline *)
+    | Heading (_attr, size, inline) -> (size, inline)
+    | Paragraph (_, _)
+    | List (_, _, _, _)
+    | Blockquote (_, _)
+    | Thematic_break _
+    | Code_block (_, _, _)
+    | Html_block (_, _)
+    | Definition_list (_, _)
+    | Table (_, _, _) ->
+        raise Invalid_markdown
+  in
+  let () = match size with 1 -> () | _ -> raise Invalid_markdown in
+  match inline with
+  | Text (_, content) -> content
+  | Concat (_, _)
+  | Emph (_, _)
+  | Strong (_, _)
+  | Code (_, _)
+  | Hard_break _ | Soft_break _
+  | Link (_, _)
+  | Image (_, _)
+  | Html (_, _) ->
+      raise Invalid_markdown
+
+let render ~title ~content =
+  (* TODO: better render function *)
+  Format.sprintf
+    {|
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1"
+    />
+    <link rel="stylesheet" href="/styles/base.css" />
+
+    <title>%s - Doskya</title>
+  </head>
+  <body>
+    %s
+  </body>
+</html>
+  |}
+    title content
+
 let on_wiki ~cwd ~page =
-  (* TODO: better path handling, security *)
-  let markdown = Path.(load @@ (cwd / "wiki" / (page ^ ".md"))) in
-  let markdown = Omd.of_string markdown in
-  let body = Body.of_string @@ Omd.to_html markdown in
+  let markdown =
+    Omd.of_string @@ Path.(load @@ (cwd / "wiki" / (page ^ ".md")))
+  in
+  let title = extract_title ~markdown in
+  let content = Omd.to_html markdown in
+  let body = Body.of_string @@ render ~title ~content in
+  (* TODO: content-type *)
+  Response.create ~body `OK
+
+let on_styles ~cwd =
+  let base_css = Path.(load @@ (cwd / "styles" / "base.css")) in
+  let body = Body.of_string base_css in
+  (* TODO: content-type *)
   Response.create ~body `OK
 
 let main () =
@@ -67,6 +144,7 @@ let main () =
       | `GET -> (
           match Route.Path.of_string target with
           | Some (Wiki { page }) -> on_wiki ~cwd ~page
+          | Some Styles -> on_styles ~cwd
           | None -> not_found ())
       | `Other _ | `PUT | `OPTIONS | `CONNECT | `TRACE | `DELETE | `HEAD | `POST
         ->
